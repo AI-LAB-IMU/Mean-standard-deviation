@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/layoutRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#000000"
+    android:padding="16dp">
+
+    <!-- ✅ 센서 상태 스크롤뷰 (상단 대부분 공간 차지) -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:overScrollMode="always"
+        android:scrollbars="vertical"
+        android:background="#222222">
+
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="센서 상태 표시 영역"
+            android:textColor="#00FF00"
+            android:textSize="18sp"
+            android:padding="12dp"
+            android:lineSpacingExtra="6dp"
+            android:textStyle="bold" />
+    </ScrollView>
+
+    <!-- ✅ 카운트 출력 (고정, 높이 wrap_content) -->
+    <TextView
+        android:id="@+id/tvcount"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textColor="#000000"
+        android:textSize="14sp"
+        android:gravity="center"
+        android:padding="10dp"
+        android:background="#D3EDDC65"
+        android:layout_marginTop="8dp" />
+
+    <!-- ✅ 경고 / 긴급 출력 (고정, 높이 wrap_content) -->
+    <TextView
+        android:id="@+id/tvAlert"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textColor="#FF4444"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:padding="12dp"
+        android:background="#330000"
+        android:layout_marginTop="6dp" />
+</LinearLayout>

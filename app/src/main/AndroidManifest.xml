@@ -3,8 +3,27 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.example.imu_0324_2">
 
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+
+    <!-- 센서 데이터 접근 허용 -->
+    <uses-permission android:name="android.permission.BODY_SENSORS" />
+
+    <!-- 활동 인식 허용 (걸음, 뛰기 등) -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+
     <!-- 고속 샘플링 센서 권한 추가 -->
     <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+
+
+
+
 
     <application
         android:allowBackup="true"
@@ -26,6 +45,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".IMUSensorService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+
+
 
     </application>
 

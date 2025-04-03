@@ -1,182 +1,95 @@
 package com.example.imu_0324_2
 
-import android.content.Context
-import android.hardware.Sensor
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
-import android.hardware.SensorManager
+import android.content.*
+import android.os.*
+import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
-import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.view.WindowManager
-import android.graphics.Color
-import android.widget.TextView
-import kotlin.math.*
+import androidx.core.content.FileProvider
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 
-class MainActivity : AppCompatActivity(), SensorEventListener {
+class MainActivity : AppCompatActivity() {
 
-    private lateinit var sensorManager: SensorManager
-    private var accelerometer: Sensor? = null
-
+    private lateinit var tvWindowIndex: TextView
     private lateinit var tvStatus: TextView
-    private lateinit var tvAlert: TextView
-    private lateinit var tvCount: TextView
+    private lateinit var btnStart: Button
+    private lateinit var btnStop: Button
+    private lateinit var btnDownload: Button
 
-    private val sampleInterval = 40L
-    private val windowSize = 350
-    private val slideStep = 175
-
-    private val deltaBuffer = ArrayDeque<Double>()
-    private val smoothBuffer = ArrayDeque<Double>()
-
-    private var previousSvm: Double? = null
-    private var lastUpdate: Long = 0
-    private var emergencyMode = false
-    private var handler = Handler(Looper.getMainLooper())
-    private var slideCounter = 0
-    private var dangerCounter = 0
-    private var timerStartTime: Long = 0L
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        setContentView(R.layout.activity_main)
-
-        tvStatus = findViewById(R.id.tvStatus)
-        tvAlert = findViewById(R.id.tvAlert)
-        tvCount = findViewById(R.id.tvcount)
-
-        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-    }
-
-    override fun onResume() {
-        super.onResume()
-        accelerometer?.let {
-            sensorManager.registerListener(this, it, 40000)
-        }
-        timerStartTime = System.currentTimeMillis()
-    }
-
-    override fun onPause() {
-        super.onPause()
-        sensorManager.unregisterListener(this)
-    }
-
-    override fun onSensorChanged(event: SensorEvent?) {
-        if (event?.sensor?.type != Sensor.TYPE_ACCELEROMETER) return
-
-        val currentTime = System.currentTimeMillis()
-        if (currentTime - lastUpdate < sampleInterval) return
-        lastUpdate = currentTime
-
-        val x = event.values[0].toDouble()
-        val y = event.values[1].toDouble()
-        val z = event.values[2].toDouble()
-        val svm = sqrt(x.pow(2) + y.pow(2) + z.pow(2))
-
-        val deltaSvm = previousSvm?.let { abs(svm - it) } ?: 0.0
-        previousSvm = svm
-
-        if (deltaBuffer.size >= windowSize) deltaBuffer.removeFirst()
-        deltaBuffer.addLast(deltaSvm)
-
-        if (smoothBuffer.size >= 5) smoothBuffer.removeFirst()
-        smoothBuffer.addLast(deltaSvm)
-        val smoothedDelta = smoothBuffer.average()
-
-        val stats = computeStatistics(deltaBuffer)
-        val (meanSVM, sdSVM, _, _) = stats
-
-        val elapsedSec = (System.currentTimeMillis() - timerStartTime) / 1000.0
-
-        tvStatus.text = """
-            Time: ${"%.1f".format(elapsedSec)}s
-            SVM = ${"%.2f".format(svm)}
-            ΔSVM = ${"%.2f".format(smoothedDelta)}
-            μ = ${"%.2f".format(meanSVM)}, σ = ${"%.2f".format(sdSVM)}
-        """.trimIndent()
-
-        if (deltaBuffer.size >= windowSize) {
-            slideCounter++
-            if (slideCounter >= slideStep) {
-                slideCounter = 0
-                timerStartTime = System.currentTimeMillis()
-
-                val isDanger = meanSVM > 3.6 && sdSVM > 3.3
-                val isWarning = meanSVM > 3.3 && sdSVM > 2.8
-                val isAttention = meanSVM > 1.5
-
-                if (isDanger) {
-                    dangerCounter++
-                } else {
-                    dangerCounter = 0
-                }
-
-                when {
-                    dangerCounter >= 2 -> {
-                        if (!emergencyMode) {
-                            emergencyMode = true
-                            tvAlert.setBackgroundColor(Color.parseColor("#FF4444"))
-                            tvAlert.setTextColor(Color.BLACK)
-                            tvAlert.text = "🚨 긴급 모드 활성화"
-                            tvCount.text = "긴급2차"
-                            handler.postDelayed({
-                                emergencyMode = false
-                                tvAlert.text = ""
-                                tvCount.text = ""
-                                tvAlert.setBackgroundColor(Color.parseColor("#22CCCCCC"))
-                            }, 5000)
-                        }
-                    }
-
-                    dangerCounter == 1 -> {
-                        if (!emergencyMode) {
-                            tvAlert.setBackgroundColor(Color.parseColor("#FFBB33"))
-                            tvAlert.setTextColor(Color.BLACK)
-                            tvAlert.text = "⚠ 강한 움직임 감지"
-                            tvCount.text = "긴급1차"
-                        }
-                    }
-
-                    isWarning || isAttention -> {
-                        if (!emergencyMode) {
-                            tvAlert.setBackgroundColor(Color.parseColor("#33B5E5"))
-                            tvAlert.setTextColor(Color.BLACK)
-                            tvAlert.text = "🔵 주의: 움직임 감지"
-                            tvCount.text = ""
-                        }
-                    }
-
-                    else -> {
-                        if (!emergencyMode) {
-                            tvAlert.setBackgroundColor(Color.parseColor("#22CCCCCC"))
-                            tvAlert.setTextColor(Color.BLACK)
-                            tvAlert.text = "✔ 안전"
-                            tvCount.text = ""
-                        }
-                    }
+    private val statusReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val index = intent?.getIntExtra("index", 0) ?: 0
+            val status = intent?.getStringExtra("status") ?: "알 수 없음"
+            runOnUiThread {
+                tvWindowIndex.text = "슬라이딩 윈도우 #$index"
+                tvStatus.text = when (status) {
+                    "위험" -> "🔴 상태: 위험"
+                    "주의" -> "🟡 상태: 주의"
+                    else -> "🟢 상태: 안전"
                 }
             }
         }
     }
 
-    private fun computeStatistics(data: Collection<Double>): Quadruple {
-        val mean = data.average()
-        val std = sqrt(data.map { (it - mean).pow(2) }.average())
-        val sorted = data.sorted()
-        val q1 = sorted[sorted.size / 4]
-        val q3 = sorted[(sorted.size * 3) / 4]
-        return Quadruple(mean, std, q1, q3)
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        tvWindowIndex = findViewById(R.id.tvWindowIndex)
+        tvStatus = findViewById(R.id.tvStatus)
+        btnStart = findViewById(R.id.btnStart)
+        btnStop = findViewById(R.id.btnStop)
+        btnDownload = findViewById(R.id.btnDownload)
+
+        btnStart.setOnClickListener {
+            startForegroundService(Intent(this, IMUSensorService::class.java))
+            Toast.makeText(this, "수집 시작", Toast.LENGTH_SHORT).show()
+        }
+
+        btnStop.setOnClickListener {
+            stopService(Intent(this, IMUSensorService::class.java))
+            Toast.makeText(this, "수집 중단", Toast.LENGTH_SHORT).show()
+        }
+
+        btnDownload.setOnClickListener {
+            copyLatestCsvToDownloads()
+        }
     }
 
-    data class Quadruple(
-        val mean: Double,
-        val std: Double,
-        val q1: Double,
-        val q3: Double
-    )
+    override fun onResume() {
+        super.onResume()
+        val filter = IntentFilter("IMU_STATUS_UPDATE")
+        LocalBroadcastManager.getInstance(this).registerReceiver(statusReceiver, filter)
+    }
 
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    override fun onPause() {
+        super.onPause()
+        LocalBroadcastManager.getInstance(this).unregisterReceiver(statusReceiver)
+    }
+
+    private fun copyLatestCsvToDownloads() {
+        val srcDir = getExternalFilesDir(null) ?: return
+        val files = srcDir.listFiles { _, name -> name.startsWith("imu_risk_log") && name.endsWith(".csv") }
+        val latestFile = files?.maxByOrNull { it.lastModified() }
+
+        if (latestFile == null) {
+            Toast.makeText(this, "CSV 파일이 없습니다.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val destFile = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), latestFile.name)
+        try {
+            FileInputStream(latestFile).use { input ->
+                FileOutputStream(destFile).use { output ->
+                    input.copyTo(output)
+                }
+            }
+            Toast.makeText(this, "다운로드 폴더로 복사 완료!", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "복사 실패: ${e.message}", Toast.LENGTH_LONG).show()
+            e.printStackTrace()
+        }
+    }
 }

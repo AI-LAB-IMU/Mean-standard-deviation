@@ -28,13 +28,12 @@ class IMUSensorService : Service(), SensorEventListener {
     private var accelerometer: Sensor? = null
     private lateinit var csvWriter: FileWriter
 
-    private var lastTimestamp: Long = 0L
-    private var wakeLock: PowerManager.WakeLock? = null  // 🔋 슬립 모드 유지용
+    private var lastSensorTimestampNanos: Long = 0L
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
 
-        // 🔋 Wakelock 설정 (슬립 모드에서도 CPU 유지)
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "IMU::WakeLock")
         wakeLock?.acquire()
@@ -43,25 +42,31 @@ class IMUSensorService : Service(), SensorEventListener {
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
         val timestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault()).format(Date())
-        val fileName = "imu_risk_log_$timestamp.csv"
-        val file = File(getExternalFilesDir(null), fileName)
+        val file = File(getExternalFilesDir(null), "imu_risk_log_$timestamp.csv")
         val isNew = file.createNewFile()
         csvWriter = FileWriter(file, true)
         if (isNew) {
-            csvWriter.appendLine("WindowIndex,MeanSVM,MeanDeltaSVM,StdDeltaSVM,Status")
+            csvWriter.appendLine("Timestamp,WindowIndex,MeanSVM,MeanDeltaSVM,StdDeltaSVM,Status")
         }
 
         startForeground(1, createServiceNotification())
 
         accelerometer?.let {
-            sensorManager.registerListener(this, it, 40000)
+            sensorManager.registerListener(this, it, 40000) // 25Hz 고정
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) {
-            sensorManager.registerListener(this, accelerometer, 40000)
-        } else {
-            sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME)
+        // 🔁 MainActivity 1분마다 실행 루프 (화면 유지용)
+        val handler = Handler(Looper.getMainLooper())
+        val reopenRunnable = object : Runnable {
+            override fun run() {
+                val intent = Intent(this@IMUSensorService, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                }
+                startActivity(intent)
+                handler.postDelayed(this, 60000)
+            }
         }
+        handler.postDelayed(reopenRunnable, 60000)
 
         Log.d("IMU", "Service started")
     }
@@ -69,18 +74,15 @@ class IMUSensorService : Service(), SensorEventListener {
     override fun onSensorChanged(event: SensorEvent) {
         if (event.sensor.type != Sensor.TYPE_ACCELEROMETER) return
 
-        val now = System.currentTimeMillis()
-        if (lastTimestamp != 0L) {
-            val interval = now - lastTimestamp
-            Log.d("IMU_FREQ", "센서 간격: ${interval}ms")
+        val currentTimestampNanos = event.timestamp
+        if (lastSensorTimestampNanos != 0L) {
+            val intervalMillis = (currentTimestampNanos - lastSensorTimestampNanos) / 1_000_000
+            Log.d("IMU_FREQ", "센서 간격: ${intervalMillis}ms")
         }
-        lastTimestamp = now
+        lastSensorTimestampNanos = currentTimestampNanos
 
-        val x = event.values[0].toDouble()
-        val y = event.values[1].toDouble()
-        val z = event.values[2].toDouble()
+        val (x, y, z) = event.values.map { it.toDouble() }
         val svm = sqrt(x * x + y * y + z * z)
-
         val delta = previousSVM?.let { abs(svm - it) } ?: 0.0
         previousSVM = svm
 
@@ -98,14 +100,18 @@ class IMUSensorService : Service(), SensorEventListener {
             val stdDelta = stdDev(deltaList)
 
             val status = determineStatus(meanSVM, meanDelta, stdDelta)
-
             windowIndex++
 
-            Log.i("IMU_WINDOW", "Window #$windowIndex ▶ 평균 SVM: %.2f, ΔSVM: %.2f, StdΔSVM: %.2f → 상태: $status"
-                .format(meanSVM, meanDelta, stdDelta))
+            val now = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()).format(Date())
+            val line = "$now,$windowIndex,%.2f,%.2f,%.2f,$status".format(meanSVM, meanDelta, stdDelta)
 
-            val line = "$windowIndex,%.2f,%.2f,%.2f,$status".format(meanSVM, meanDelta, stdDelta)
-            csvWriter.appendLine(line)
+            try {
+                csvWriter.appendLine(line)
+                csvWriter.flush()
+                Log.d("IMU_FILE", "📝 CSV 기록됨: $line")
+            } catch (e: Exception) {
+                Log.e("IMU_FILE", "❌ CSV 쓰기 실패: ${e.message}")
+            }
 
             sendStatusUpdate(windowIndex, status)
 
@@ -115,6 +121,8 @@ class IMUSensorService : Service(), SensorEventListener {
             }
         }
     }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
     private fun sendStatusUpdate(index: Int, status: String) {
         val intent = Intent("IMU_STATUS_UPDATE")
@@ -143,29 +151,44 @@ class IMUSensorService : Service(), SensorEventListener {
             ).apply {
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 500, 200, 500)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
             manager.createNotificationChannel(channel)
         }
+
+        val intent = Intent(this, AlertActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            putExtra("windowIndex", windowIndex)
+            putExtra("meanSVM", meanSVM)
+        }
+
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
 
         val notification = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("🚨 위험 감지됨")
             .setContentText("Window #$windowIndex - SVM: %.2f".format(meanSVM))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setFullScreenIntent(pendingIntent, true)
             .setAutoCancel(true)
             .build()
 
         manager.notify(9999, notification)
+        startActivity(intent)
     }
-
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
     override fun onDestroy() {
         super.onDestroy()
         sensorManager.unregisterListener(this)
-        csvWriter.flush()
-        csvWriter.close()
-        wakeLock?.release()  // 🔋 슬립 모드 해제
+        try {
+            csvWriter.flush()
+            csvWriter.close()
+            Log.d("IMU_FILE", "📁 서비스 종료 시 CSV flush & close 완료")
+        } catch (e: Exception) {
+            Log.e("IMU_FILE", "❌ 종료 시 CSV flush/close 실패: ${e.message}")
+        }
+        wakeLock?.release()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

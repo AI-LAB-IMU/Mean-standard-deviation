@@ -2,6 +2,7 @@ package com.example.imu_0324_2
 
 import android.content.*
 import android.os.*
+import android.view.WindowManager
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
@@ -18,6 +19,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnStop: Button
     private lateinit var btnDownload: Button
 
+    // 센서 상태 수신
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val index = intent?.getIntExtra("index", 0) ?: 0
@@ -36,6 +38,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // 화면 꺼짐 방지
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         tvWindowIndex = findViewById(R.id.tvWindowIndex)
         tvStatus = findViewById(R.id.tvStatus)

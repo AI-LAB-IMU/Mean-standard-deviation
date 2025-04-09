@@ -46,6 +46,12 @@
             </intent-filter>
         </activity>
 
+        <activity android:name=".AlertActivity"
+            android:theme="@android:style/Theme.DeviceDefault.Dialog.NoActionBar"
+            android:exported="true"
+            android:launchMode="singleTop"/>
+
+
         <service
             android:name=".IMUSensorService"
             android:enabled="true"
